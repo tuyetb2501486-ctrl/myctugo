@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MyCTU.Go - Bản Đồ Campus & Thẻ Sinh Viên Điện Tử ĐHCT</title>
+    
+    <!-- Tailwind CSS Engine -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ctu: {
+                            blue: '#0054a6',
+                            darkBlue: '#003b75',
+                            gold: '#fdb813',
+                            accent: '#00a8cc'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet GIS Engine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- QRCode Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <style>
+        html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; }
+        .glass {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+        .glass-dark {
+            background: rgba(0, 84, 166, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .glass-card {
+            background: linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(240,246,255,0.9) 100%);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 84, 166, 0.15);
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1;
+        }
+        .leaflet-popup-content-wrapper {
+            border-radius: 1rem;
+            padding: 2px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        .leaflet-popup-content { margin: 6px; }
+        /* 3D Student Card Flip */
+        .perspective-1000 { perspective: 1000px; }
+        .card-inner {
+            transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-style: preserve-3d;
+        }
+        .card-flipped { transform: rotateY(180deg); }
+        .card-front, .card-back {
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+        .card-back { transform: rotateY(180deg); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-slate-100 font-sans h-screen flex flex-col select-none">
+
+    <!-- HEADER TOP BAR -->
+    <header class="glass-dark text-white shadow-md z-30 px-4 py-2.5 flex items-center justify-between shrink-0">
+        <div class="flex items-center space-x-3">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Logo_Truong_Dai_Hoc_Can_Tho.svg/512px-Logo_Truong_Dai_Hoc_Can_Tho.svg.png" 
+                 alt="CTU Logo" class="h-9 w-9 bg-white rounded-full p-0.5 shadow object-contain">
+            <div>
+                <h1 class="font-bold text-base leading-tight flex items-center gap-1.5">
+                    MyCTU.<span class="bg-ctu-gold text-ctu-darkBlue text-[10px] font-black px-2 py-0.5 rounded-full uppercase">Go</span>
+                </h1>
+                <p class="text-[10px] text-blue-100">Bản Đồ Campus & Thẻ Sinh Viên Điện Tử</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <span id="headerRoleBadge" class="hidden sm:inline-block bg-amber-400 text-slate-900 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">KHACH</span>
+            <button onclick="toggleAuthModal()" class="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl border border-white/20 text-xs transition">
+                <i class="fa-solid fa-circle-user text-ctu-gold text-sm" id="userStatusIcon"></i>
+                <span id="headerUserName" class="hidden md:inline font-medium">Đăng nhập</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN APP CONTENT AREA -->
+    <main class="flex-1 relative overflow-hidden bg-slate-200">
+
+        <!-- TAB 1: BẢN ĐỒ -->
+        <section id="tab-map" class="tab-content h-full w-full relative">
+            <!-- Leaflet Container -->
+            <div id="map"></div>
+
+            <!-- Filter Chips -->
+            <div class="absolute top-3 left-3 right-3 z-[500] flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <button onclick="filterCategory('all')" class="bg-ctu-blue text-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-layer-group"></i> Tất cả (49)
+                </button>
+                <button onclick="filterCategory('favorite')" class="glass text-rose-600 hover:bg-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-heart text-rose-500"></i> Yêu thích
+                </button>
+                <button onclick="filterCategory('khoa')" class="glass text-slate-700 hover:bg-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-graduation-cap text-ctu-blue"></i> Khoa / Viện
+                </button>
+                <button onclick="filterCategory('giangduong')" class="glass text-slate-700 hover:bg-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-building text-indigo-600"></i> Giảng đường
+                </button>
+                <button onclick="filterCategory('cantin')" class="glass text-slate-700 hover:bg-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-utensils text-orange-500"></i> Nhà ăn / Căn tin
+                </button>
+                <button onclick="filterCategory('thuvien')" class="glass text-slate-700 hover:bg-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-book-open text-emerald-600"></i> Thư viện
+                </button>
+                <button onclick="filterCategory('tienich')" class="glass text-slate-700 hover:bg-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-md whitespace-nowrap flex items-center gap-1">
+                    <i class="fa-solid fa-store text-rose-500"></i> Tiện ích
+                </button>
+            </div>
+
+            <!-- Floating Controls -->
+            <div class="absolute bottom-5 right-4 z-[500] flex flex-col gap-2">
+                <button onclick="getUserLocation()" title="GPS Vị trí của tôi" class="w-11 h-11 bg-white text-ctu-blue rounded-full shadow-lg flex items-center justify-center hover:bg-slate-50 border border-slate-200">
+                    <i class="fa-solid fa-crosshairs text-lg"></i>
+                </button>
+                <button onclick="resetMapView()" title="Toàn cảnh Campus" class="w-11 h-11 bg-white text-slate-700 rounded-full shadow-lg flex items-center justify-center hover:bg-slate-50 border border-slate-200">
+                    <i class="fa-solid fa-campground text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Search Bar -->
+            <div class="absolute top-14 left-3 right-3 z-[500] md:max-w-md md:left-4">
+                <div class="glass rounded-2xl shadow-lg px-3.5 py-2 flex items-center gap-2 border border-white/60">
+                    <i class="fa-solid fa-magnifying-glass text-slate-400 text-sm"></i>
+                    <input type="text" id="mapSearchInput" onkeyup="handleSearch(event)" placeholder="Tìm tòa nhà, khoa, phòng học, căn tin, ATM..." 
+                           class="w-full bg-transparent text-sm text-slate-800 focus:outline-none placeholder-slate-400">
+                    <button onclick="clearSearch()" id="clearSearchBtn" class="hidden text-slate-400 hover:text-slate-600">
+                        <i class="fa-solid fa-circle-xmark"></i>
+                    </button>
+                </div>
+                <div id="searchResults" class="hidden mt-1 glass rounded-2xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100 p-1 border border-white/60"></div>
+            </div>
+        </section>
+
+        <!-- TAB 2: CHỈ ĐƯỜNG -->
+        <section id="tab-directions" class="tab-content hidden h-full w-full p-4 overflow-y-auto">
+            <div class="max-w-md mx-auto space-y-4">
+                <div class="glass-card rounded-3xl p-5 shadow-xl space-y-3.5">
+                    <h2 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                        <i class="fa-solid fa-diamond-turn-right text-ctu-blue"></i> Dẫn Đường Trong Campus
+                    </h2>
+
+                    <div class="grid grid-cols-3 gap-2 bg-slate-200/60 p-1 rounded-2xl text-center text-xs font-semibold">
+                        <button onclick="setTransportMode('walk')" id="btn-mode-walk" class="mode-btn bg-ctu-blue text-white py-2 rounded-xl shadow-sm transition">
+                            <i class="fa-solid fa-walking"></i> Đi bộ
+                        </button>
+                        <button onclick="setTransportMode('bike')" id="btn-mode-bike" class="mode-btn text-slate-600 py-2 rounded-xl transition">
+                            <i class="fa-solid fa-bicycle"></i> Xe đạp
+                        </button>
+                        <button onclick="setTransportMode('moto')" id="btn-mode-moto" class="mode-btn text-slate-600 py-2 rounded-xl transition">
+                            <i class="fa-solid fa-motorcycle"></i> Xe máy
+                        </button>
+                    </div>
+
+                    <div class="space-y-2 relative">
+                        <div class="flex items-center gap-2 bg-white rounded-2xl p-3 shadow-sm border border-slate-200">
+                            <i class="fa-solid fa-circle text-emerald-500 text-xs px-1"></i>
+                            <select id="routeOrigin" class="w-full bg-transparent text-xs text-slate-700 focus:outline-none font-medium">
+                                <option value="gps">📍 Cổng A (Đường 3/2) / GPS vị trí</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2 bg-white rounded-2xl p-3 shadow-sm border border-slate-200">
+                            <i class="fa-solid fa-location-dot text-rose-500 text-sm px-1"></i>
+                            <select id="routeDestination" class="w-full bg-transparent text-xs text-slate-700 focus:outline-none font-medium">
+                                <option value="">-- Chọn điểm đến trong 49 địa điểm --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button onclick="calculateRoute()" class="w-full bg-ctu-blue hover:bg-ctu-darkBlue text-white font-semibold py-3 rounded-2xl shadow-lg transition flex items-center justify-center gap-2 text-xs">
+                        <i class="fa-solid fa-route text-sm"></i> Bắt đầu Chỉ Đường
+                    </button>
+                </div>
+
+                <div id="routeInfoCard" class="hidden glass-card rounded-3xl p-5 shadow-xl space-y-3">
+                    <div class="flex justify-between items-center border-b border-slate-200 pb-3">
+                        <div>
+                            <p class="text-xs text-slate-500 font-medium">Khoảng cách</p>
+                            <h3 class="font-bold text-xl text-ctu-blue" id="routeDistance">0 m</h3>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-xs text-slate-500 font-medium">Thời gian tính toán</p>
+                            <h3 class="font-bold text-xl text-emerald-600" id="routeDuration">0 phút</h3>
+                        </div>
+                    </div>
+                    <div id="routeStepsList" class="space-y-2 text-xs text-slate-600 max-h-48 overflow-y-auto"></div>
+                    <button onclick="showRouteOnMap()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2.5 rounded-xl shadow transition text-xs flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-map-marked-alt text-sm"></i> Xem tuyến đường trên bản đồ
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: THẺ SINH VIÊN ĐIỆN TỬ -->
+        <section id="tab-card" class="tab-content hidden h-full w-full p-4 overflow-y-auto">
+            <div class="max-w-md mx-auto space-y-4">
+                <div class="text-center">
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-id-card text-ctu-blue"></i> Thẻ Sinh Viên Điện Tử CTU
+                    </h2>
+                    <p class="text-xs text-slate-500">Mã QR xác thực bảo mật đổi token mỗi 30s chống giả mạo</p>
+                </div>
+
+                <!-- 3D Flip Card -->
+                <div class="perspective-1000 cursor-pointer" onclick="flipStudentCard()">
+                    <div id="cardInner" class="card-inner relative w-full h-[260px] rounded-2xl shadow-2xl transition-transform duration-700">
+                        
+                        <!-- CARD FRONT -->
+                        <div class="card-front absolute inset-0 w-full h-full rounded-2xl p-4 text-white flex flex-col justify-between overflow-hidden" 
+                             style="background: linear-gradient(135deg, #0054a6 0%, #002d5a 100%); border: 1px solid rgba(255,255,255,0.3);">
+                            
+                            <div class="flex items-center justify-between border-b border-white/20 pb-2 z-10 shrink-0">
+                                <div class="flex items-center gap-2">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Logo_Truong_Dai_Hoc_Can_Tho.svg/512px-Logo_Truong_Dai_Hoc_Can_Tho.svg.png" 
+                                         class="h-8 w-8 bg-white rounded-full p-0.5 shadow object-contain" alt="CTU Seal">
+                                    <div>
+                                        <h3 class="font-bold text-[11px] uppercase tracking-wider leading-none">Trường Đại Học Cần Thơ</h3>
+                                        <p class="text-[9px] text-blue-200 mt-0.5">CAN THO UNIVERSITY</p>
+                                    </div>
+                                </div>
+                                <span class="bg-ctu-gold text-ctu-darkBlue font-black text-[10px] px-2 py-0.5 rounded uppercase shadow tracking-wide">THẺ SINH VIÊN</span>
+                            </div>
+
+                            <div class="flex gap-3 items-center z-10 my-auto">
+                                <img id="cardAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250" 
+                                     alt="Avatar" class="w-20 h-26 object-cover rounded-lg border-2 border-white/80 shadow shrink-0">
+                                <div class="space-y-1 text-slate-100 flex-1 min-w-0">
+                                    <div>
+                                        <p class="text-[9px] text-blue-200 uppercase font-medium">Họ và tên / Full name</p>
+                                        <p class="font-bold text-sm tracking-wide text-white uppercase truncate" id="cardName">CHƯA ĐĂNG NHẬP</p>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-1">
+                                        <div>
+                                            <p class="text-[9px] text-blue-200">MSSV / ID</p>
+                                            <p class="font-bold text-ctu-gold text-xs font-mono" id="cardMSSV">B25XXXXX</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-[9px] text-blue-200">Lớp / Class</p>
+                                            <p class="font-semibold text-white text-xs" id="cardClass">---</p>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <p class="text-[9px] text-blue-200">Khoa / Faculty</p>
+                                        <p class="font-semibold text-[11px] text-slate-100 truncate" id="cardFaculty">Vui lòng đăng nhập tài khoản</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex justify-between items-end border-t border-white/20 pt-1.5 text-[11px] text-blue-200 z-10">
+                                <span>Khóa: <strong class="text-white" id="cardCourse">K51 (2025-2029)</strong></span>
+                                <span class="text-emerald-300 font-semibold"><i class="fa-solid fa-shield-halved"></i> Chống giả mạo</span>
+                            </div>
+                        </div>
+
+                        <!-- CARD BACK -->
+                        <div class="card-back absolute inset-0 w-full h-full bg-slate-900 rounded-2xl p-4 text-white flex flex-col justify-between border border-slate-700 shadow-2xl">
+                            <div class="flex justify-between items-center border-b border-slate-700 pb-1.5">
+                                <div>
+                                    <span class="text-xs font-bold text-slate-200 block">MÃ QR XÁC THỰC AN TOÀN</span>
+                                    <span class="text-[10px] text-emerald-400 font-mono" id="qrRefreshTimerText">Đổi token sau: 30s</span>
+                                </div>
+                                <span class="bg-blue-900/80 text-ctu-gold text-[10px] font-mono px-2 py-0.5 rounded border border-ctu-gold/30">AUTHENTICATED</span>
+                            </div>
+
+                            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden my-1">
+                                <div id="qrCountdownProgress" class="bg-ctu-gold h-full transition-all duration-1000" style="width: 100%;"></div>
+                            </div>
+
+                            <div class="flex items-center justify-around my-auto">
+                                <div class="bg-white p-2 rounded-xl shadow border-2 border-ctu-gold flex flex-col items-center">
+                                    <div id="cardQRCode"></div>
+                                    <div class="text-[9px] font-mono text-slate-800 text-center mt-1 font-bold" id="qrTokenShortCode">HASH: --------</div>
+                                </div>
+
+                                <div class="text-right space-y-1.5 text-xs">
+                                    <div>
+                                        <p class="text-[10px] text-slate-400">Trạng thái thẻ</p>
+                                        <span class="inline-block bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full text-[10px]">● Đang hoạt động</span>
+                                    </div>
+                                    <div>
+                                        <p class="text-[10px] text-slate-400">Ngày hết hạn</p>
+                                        <p class="font-bold text-ctu-gold text-xs font-mono" id="cardExpiryDate">30/06/2029</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-slate-800/80 rounded p-1 text-center border border-slate-700">
+                                <p class="text-[10px] font-mono tracking-widest text-slate-300 font-bold" id="cardBarcodeText">*UNAUTH*</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2">
+                    <button onclick="openProfileEditModal()" class="glass font-semibold py-2.5 px-2 rounded-xl text-xs text-ctu-blue shadow hover:bg-white transition flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-user-pen"></i> Sửa Thông Tin
+                    </button>
+                    <button onclick="toggleAuthModal()" class="glass font-semibold py-2.5 px-2 rounded-xl text-xs text-slate-700 shadow hover:bg-white transition flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-key"></i> Đăng Nhập
+                    </button>
+                    <button onclick="switchTab('verify')" class="bg-ctu-blue text-white font-semibold py-2.5 px-2 rounded-xl text-xs shadow transition flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-qrcode"></i> Quét Thẻ SV
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: CỔNG KIỂM SOÁT QUÉT THẺ -->
+        <section id="tab-verify" class="tab-content hidden h-full w-full p-4 overflow-y-auto">
+            <div class="max-w-xl mx-auto space-y-4">
+                <div class="glass-card rounded-3xl p-4 shadow-xl flex flex-wrap justify-between items-center gap-2">
+                    <div>
+                        <h2 class="font-bold text-base text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-shield-virus text-ctu-blue"></i> Cổng Kiểm Soát Thẻ Sinh Viên
+                        </h2>
+                        <p class="text-xs text-slate-500">Dành cho Bảo vệ & Cán bộ Thư viện</p>
+                    </div>
+                    <select id="verifyGateLocation" class="bg-white border border-slate-200 text-xs font-semibold rounded-xl px-3 py-1.5 text-ctu-blue focus:outline-none">
+                        <option value="Cổng A (3/2)">📍 Cổng A (3/2)</option>
+                        <option value="Trung Tâm Học Liệu">📚 Trung Tâm Học Liệu</option>
+                        <option value="Căn Tin CIT">🍲 Căn tin CIT</option>
+                    </select>
+                </div>
+
+                <div class="glass rounded-3xl p-4 shadow-xl border border-white space-y-3">
+                    <div class="space-y-1.5">
+                        <label class="text-xs font-bold text-slate-700 uppercase">Mẫu Mã QR Payload quét được</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="verifyQrInput" placeholder="Dán chuỗi CTU_VERIFY|..." 
+                                   class="w-full px-3 py-2 bg-white rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-none">
+                            <button onclick="executeVerification()" class="bg-ctu-blue text-white font-bold px-4 py-2 rounded-xl text-xs shadow shrink-0">Kiểm Tra</button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="testVerifyCurrentStudent()" class="bg-emerald-600 text-white text-[11px] font-medium px-3 py-1.5 rounded-lg shadow">
+                            <i class="fa-solid fa-check-circle"></i> Thẻ Hiện Tại
+                        </button>
+                        <button onclick="testVerifyExpiredStudent()" class="bg-amber-600 text-white text-[11px] font-medium px-3 py-1.5 rounded-lg shadow">
+                            <i class="fa-solid fa-clock"></i> Thẻ Hết Hạn
+                        </button>
+                        <button onclick="testVerifyForgedToken()" class="bg-rose-600 text-white text-[11px] font-medium px-3 py-1.5 rounded-lg shadow">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Thẻ Giả Mạo
+                        </button>
+                    </div>
+
+                    <div id="verifyResultCard" class="hidden rounded-2xl p-3 text-xs transition-all"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: BẢNG QUẢN TRỊ ADMIN -->
+        <section id="tab-admin" class="tab-content hidden h-full w-full p-4 overflow-y-auto">
+            <div class="max-w-4xl mx-auto space-y-4">
+
+                <div id="adminAccessDeniedCard" class="glass-card rounded-3xl p-6 shadow-2xl text-center space-y-3 max-w-sm mx-auto my-10">
+                    <div class="w-12 h-12 bg-rose-100 text-rose-600 rounded-2xl mx-auto flex items-center justify-center text-2xl">
+                        <i class="fa-solid fa-user-shield"></i>
+                    </div>
+                    <h2 class="font-bold text-lg text-slate-800">Yêu Cầu Quyền Admin</h2>
+                    <p class="text-xs text-slate-500">Đăng nhập tài khoản Admin để quản lý 49 địa điểm bản đồ và sinh viên.</p>
+                    <div class="bg-slate-100 p-3 rounded-xl text-left text-xs font-mono space-y-1">
+                        <p>Username: <strong>admin</strong></p>
+                        <p>Password: <strong>admin123</strong></p>
+                    </div>
+                    <button onclick="toggleAuthModal('ADMIN')" class="w-full bg-ctu-blue text-white font-bold py-2.5 rounded-xl shadow text-xs">
+                        Đăng Nhập Quản Trị Viên
+                    </button>
+                </div>
+
+                <div id="adminDashboardView" class="hidden space-y-4">
+                    <div class="glass-card rounded-3xl p-4 shadow-xl flex justify-between items-center">
+                        <div>
+                            <span class="text-[10px] font-black bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full uppercase">SUPER ADMIN</span>
+                            <h2 class="font-bold text-base text-slate-800 mt-1">Bảng Quản Trị Hệ Thống MyCTU.Go</h2>
+                        </div>
+                        <button onclick="handleLogout()" class="bg-rose-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow">Đăng Xuất</button>
+                    </div>
+
+                    <div class="glass rounded-3xl shadow-xl p-4 border border-white/60 space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h3 class="font-bold text-sm text-slate-800">Danh Sách Địa Điểm Campus</h3>
+                            <button onclick="openAddPoiModal()" class="bg-ctu-blue hover:bg-ctu-darkBlue text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow flex items-center gap-1">
+                                <i class="fa-solid fa-plus"></i> Thêm Địa Điểm
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto max-h-96">
+                            <table class="w-full text-left text-xs text-slate-600">
+                                <thead class="bg-slate-100 uppercase text-[10px] font-bold">
+                                    <tr>
+                                        <th class="p-2">Tên địa điểm</th>
+                                        <th class="p-2">Danh mục</th>
+                                        <th class="p-2">Tòa nhà</th>
+                                        <th class="p-2 text-right">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminTableBody" class="divide-y divide-slate-200"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav class="glass-dark text-white border-t border-white/10 z-30 shrink-0 px-2 py-1">
+        <div class="flex justify-around items-center max-w-lg mx-auto">
+            <button onclick="switchTab('map')" id="nav-map" class="nav-btn active flex flex-col items-center py-1 px-3 text-ctu-gold transition">
+                <i class="fa-solid fa-map-location-dot text-base"></i>
+                <span class="text-[10px] font-medium mt-0.5">Bản đồ</span>
+            </button>
+            <button onclick="switchTab('directions')" id="nav-directions" class="nav-btn flex flex-col items-center py-1 px-3 text-slate-300 hover:text-white transition">
+                <i class="fa-solid fa-route text-base"></i>
+                <span class="text-[10px] font-medium mt-0.5">Chỉ đường</span>
+            </button>
+            <button onclick="switchTab('card')" id="nav-card" class="nav-btn flex flex-col items-center py-1 px-3 text-slate-300 hover:text-white transition">
+                <i class="fa-solid fa-id-card text-base"></i>
+                <span class="text-[10px] font-medium mt-0.5">Thẻ SV</span>
+            </button>
+            <button onclick="switchTab('verify')" id="nav-verify" class="nav-btn flex flex-col items-center py-1 px-3 text-slate-300 hover:text-white transition">
+                <i class="fa-solid fa-shield-halved text-base"></i>
+                <span class="text-[10px] font-medium mt-0.5">Quét Thẻ</span>
+            </button>
+            <button onclick="switchTab('admin')" id="nav-admin" class="nav-btn flex flex-col items-center py-1 px-3 text-slate-300 hover:text-white transition">
+                <i class="fa-solid fa-user-shield text-base"></i>
+                <span class="text-[10px] font-medium mt-0.5">Admin</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- MODAL POPUP CHI TIẾT ĐỊA ĐIỂM -->
+    <div id="poiDetailModal" class="hidden fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="glass-card rounded-t-3xl sm:rounded-3xl max-w-md w-full max-h-[88vh] overflow-y-auto p-5 shadow-2xl relative border border-white space-y-3">
+            <button onclick="closePoiDetailModal()" class="absolute top-3 right-3 z-20 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center backdrop-blur">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <!-- HÌNH ẢNH BANNER ĐỊA ĐIỂM -->
+            <div class="relative h-44 -mx-5 -mt-5 rounded-t-3xl overflow-hidden bg-slate-200">
+                <img id="detailImg" src="" alt="Location Banner" class="w-full h-full object-cover" 
+                     onerror="this.src='https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&q=80&w=600'">
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                <div class="absolute bottom-2.5 left-4 right-4 text-white">
+                    <span id="detailCategoryPill" class="inline-block bg-ctu-gold text-ctu-darkBlue font-black text-[10px] px-2.5 py-0.5 rounded-full uppercase mb-1 shadow">KHOA</span>
+                    <h2 id="detailName" class="font-bold text-base leading-tight drop-shadow">Tên Địa Điểm</h2>
+                </div>
+            </div>
+            
+            <div class="space-y-2 text-xs text-slate-600">
+                <p><i class="fa-solid fa-location-dot text-rose-500 w-4"></i> <span id="detailAddress">Địa chỉ</span></p>
+                <p><i class="fa-solid fa-building text-ctu-blue w-4"></i> Tòa nhà: <strong id="detailBuilding">N/A</strong></p>
+                <p><i class="fa-solid fa-layer-group text-indigo-600 w-4"></i> Quy mô: <span id="detailFloors">1 tầng</span> - <span id="detailRooms">Nhiều phòng</span></p>
+                <p><i class="fa-regular fa-clock text-emerald-600 w-4"></i> Giờ mở cửa: <span id="detailOpeningHours">7h00 - 17h00</span></p>
+                <div class="p-3 bg-white/90 rounded-xl border border-slate-200 mt-2">
+                    <p class="font-semibold text-slate-700 mb-0.5">Mô tả / Chức năng:</p>
+                    <p id="detailDesc" class="text-slate-600 leading-relaxed">Thông tin mô tả...</p>
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-1">
+                <button id="detailFavBtn" onclick="toggleCurrentPoiFavorite()" class="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-500 border">
+                    <i id="detailFavIcon" class="fa-regular fa-heart text-base"></i>
+                </button>
+                <button onclick="navigateFromDetail()" class="flex-1 bg-ctu-blue text-white font-bold py-2.5 rounded-xl shadow text-xs flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-diamond-turn-right"></i> Dẫn đường đến đây
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL AUTH LOGIN -->
+    <div id="authModal" class="hidden fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="glass-card rounded-3xl max-w-sm w-full p-6 shadow-2xl relative border border-white">
+            <button onclick="toggleAuthModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            <div class="text-center mb-4">
+                <h3 class="font-bold text-lg text-slate-800">Đăng Nhập System</h3>
+                <p class="text-xs text-slate-500">MSSV Sinh viên hoặc Tài khoản Admin</p>
+            </div>
+            <form onsubmit="handleAuthSubmit(event)" class="space-y-3 text-xs">
+                <div>
+                    <label class="font-bold text-slate-600 uppercase">MSSV / Username</label>
+                    <input type="text" id="inputMSSV" required placeholder="B2501444 hoặc admin" class="w-full mt-1 p-2.5 bg-white rounded-xl border border-slate-200 font-bold uppercase">
+                </div>
+                <div>
+                    <label class="font-bold text-slate-600 uppercase">Mật khẩu</label>
+                    <input type="password" id="inputPassword" required placeholder="Mật khẩu" class="w-full mt-1 p-2.5 bg-white rounded-xl border border-slate-200 font-semibold">
+                </div>
+                <div class="p-2 bg-slate-100 rounded-xl text-[11px] text-slate-500 space-y-0.5">
+                    <p>Sinh viên: <strong>B2501444 (Huy) | B2501457 (Ngọc) | B2501460 (Tiên) | B2501465 (Tuyết)</strong></p>
+                    <p>Mật khẩu SV: <strong>Tên + 123 (Ví dụ: Huy1234, Ngoc123, Tien123, Tuyet123)</strong></p>
+                    <p>Admin: <strong>admin / admin123</strong></p>
+                </div>
+                <button type="submit" class="w-full bg-ctu-blue text-white font-bold py-2.5 rounded-xl shadow">Xác Thực</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL EDIT PROFILE -->
+    <div id="profileEditModal" class="hidden fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="glass-card rounded-3xl max-w-sm w-full p-5 shadow-2xl relative border border-white">
+            <button onclick="closeProfileEditModal()" class="absolute top-3 right-3 text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            <h3 class="font-bold text-base text-slate-800 mb-3">Sửa Thông Tin Sinh Viên</h3>
+            <form onsubmit="handleProfileEditSubmit(event)" class="space-y-2.5 text-xs">
+                <div>
+                    <label class="font-semibold text-slate-600">Họ và tên</label>
+                    <input type="text" id="editStudentName" required class="w-full mt-1 p-2 bg-white rounded-lg border font-bold">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="font-semibold text-slate-600">Lớp</label>
+                        <input type="text" id="editStudentClass" required class="w-full mt-1 p-2 bg-white rounded-lg border">
+                    </div>
+                    <div>
+                        <label class="font-semibold text-slate-600">Khóa</label>
+                        <input type="number" id="editStudentYear" required class="w-full mt-1 p-2 bg-white rounded-lg border">
+                    </div>
+                </div>
+                <div>
+                    <label class="font-semibold text-slate-600">Khoa / Viện</label>
+                    <input type="text" id="editStudentFaculty" required class="w-full mt-1 p-2 bg-white rounded-lg border">
+                </div>
+                <div>
+                    <label class="font-semibold text-slate-600">Link Ảnh Đại Diện (Google Drive / Direct URL)</label>
+                    <input type="url" id="editStudentAvatar" required placeholder="https://drive.google.com/..." class="w-full mt-1 p-2 bg-white rounded-lg border">
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button type="button" onclick="closeProfileEditModal()" class="w-1/2 bg-slate-200 py-2 rounded-lg">Hủy</button>
+                    <button type="submit" class="w-1/2 bg-ctu-blue text-white py-2 rounded-lg font-bold">Lưu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL ADD POI (ADMIN) -->
+    <div id="addPoiModal" class="hidden fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="glass-card rounded-3xl max-w-md w-full p-5 shadow-2xl relative border border-white max-h-[90vh] overflow-y-auto">
+            <button onclick="closeAddPoiModal()" class="absolute top-3 right-3 text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+            <h3 class="font-bold text-base text-slate-800 mb-3"><i class="fa-solid fa-location-plus text-ctu-blue"></i> Thêm Địa Điểm Mới</h3>
+            <form onsubmit="handleAddPoiSubmit(event)" class="space-y-2.5 text-xs">
+                <div>
+                    <label class="font-semibold text-slate-600">Tên địa điểm</label>
+                    <input type="text" id="addPoiName" required placeholder="Ví dụ: Căn tin Khoa CNTT" class="w-full mt-1 p-2 bg-white rounded-lg border font-bold">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="font-semibold text-slate-600">Danh mục</label>
+                        <select id="addPoiCategory" class="w-full mt-1 p-2 bg-white rounded-lg border font-medium">
+                            <option value="khoa">Khoa / Viện</option>
+                            <option value="giangduong">Giảng đường</option>
+                            <option value="cantin">Căn tin</option>
+                            <option value="thuvien">Thư viện</option>
+                            <option value="tienich">Tiện ích</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="font-semibold text-slate-600">Tòa nhà / Dãy</label>
+                        <input type="text" id="addPoiBuilding" required placeholder="Dãy B1" class="w-full mt-1 p-2 bg-white rounded-lg border">
+                    </div>
+                </div>
+                <div>
+                    <label class="font-semibold text-slate-600">URL Hình Ảnh</label>
+                    <input type="url" id="addPoiImage" required placeholder="https://images.unsplash.com/..." class="w-full mt-1 p-2 bg-white rounded-lg border">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="font-semibold text-slate-600">Vĩ độ (Lat)</label>
+                        <input type="number" step="any" id="addPoiLat" required placeholder="10.0305" class="w-full mt-1 p-2 bg-white rounded-lg border font-mono">
+                    </div>
+                    <div>
+                        <label class="font-semibold text-slate-600">Kinh độ (Lng)</label>
+                        <input type="number" step="any" id="addPoiLng" required placeholder="105.7688" class="w-full mt-1 p-2 bg-white rounded-lg border font-mono">
+                    </div>
+                </div>
+                <div>
+                    <label class="font-semibold text-slate-600">Mô tả / Chức năng</label>
+                    <textarea id="addPoiDesc" rows="2" placeholder="Nhập thông tin giới thiệu ngắn..." class="w-full mt-1 p-2 bg-white rounded-lg border"></textarea>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button type="button" onclick="closeAddPoiModal()" class="w-1/2 bg-slate-200 py-2 rounded-lg font-medium">Hủy</button>
+                    <button type="submit" class="w-1/2 bg-ctu-blue text-white py-2 rounded-lg font-bold shadow">Thêm Mới</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="hidden fixed top-14 left-1/2 -translate-x-1/2 z-[2000] bg-slate-900/90 text-white text-xs font-medium px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 border border-slate-700">
+        <i class="fa-solid fa-circle-info text-ctu-gold"></i>
+        <span id="toastMsg">Thông báo</span>
+    </div>
+
+    <!-- JAVASCRIPT APPLICATION CORE -->
+    <script>
+        // HÀM TỰ ĐỘNG CHUYỂN LINK GOOGLE DRIVE THÀNH ANH HINHTHUC
+        function formatDriveImageUrl(url) {
+            if (!url) return 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250';
+            if (url.includes('drive.google.com') || url.includes('googleusercontent.com')) {
+                const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+                if (match && match[1]) {
+                    return `https://lh3.googleusercontent.com/d/${match[1]}`;
+                }
+            }
+            return url;
+        }
+
+        // CSDL 4 SINH VIÊN (HUY, NGỌC, TIÊN, TUYẾT)
+        const DEFAULT_STUDENTS = {
+            'B2501444': { 
+                name: 'NGUYỄN QUỐC HUY', 
+                password: 'Huy1234', 
+                classCode: 'DI25V7A1', 
+                faculty: 'Trường CNTT & TT', 
+                enrollmentYear: 2025, 
+                avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250' 
+            },
+            'B2501457': { 
+                name: 'TRẦN THỊ BÍCH NGỌC', 
+                password: 'Ngoc123', 
+                classCode: 'DI25V7A2', 
+                faculty: 'Trường CNTT & TT', 
+                enrollmentYear: 2025, 
+                avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=250' 
+            },
+            'B2501460': { 
+                name: 'LÊ THỊ CẨM TIÊN', 
+                password: 'Tien123', 
+                classCode: 'DI25V7A1', 
+                faculty: 'Trường CNTT & TT', 
+                enrollmentYear: 2025, 
+                avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=250' 
+            },
+            'B2501465': { 
+                name: 'PHẠM THỊ ÁNH TUYẾT', 
+                password: 'Tuyet123', 
+                classCode: 'DI25V7A2', 
+                faculty: 'Trường CNTT & TT', 
+                enrollmentYear: 2025, 
+                avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&q=80&w=250' 
+            }
+        };
+
+        const DEFAULT_ADMINS = { 'admin': { password: 'admin123' } };
+
+        // DANH SÁCH CHUẨN 49 ĐỊA ĐIỂM
+        const DEFAULT_POIS = [
+            { id: "1", name: "Trung tâm học liệu", category: "thuvien", image: "https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&q=80&w=600", address: "2QJC+3G Ninh Kiều, Cần Thơ", building: "Tòa Trung tâm Học liệu", floors: "3 tầng", rooms: "6 phòng", openingHours: "7h00 - 21H00", lat: 10.030188, lng: 105.771312, icon: "fa-book-bookmark", desc: "Thư viện trung tâm cung cấp tài liệu, sách, máy tính tra cứu và không gian tự học." },
+            { id: "2", name: "Trường Kinh tế", category: "khoa", image: "https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&q=80&w=600", address: "2QMC+69 Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "1 tầng", rooms: "9 khoa chuyên ngành", openingHours: "8h00 - 11h30, 13h30 - 17h00", lat: 10.033063, lng: 105.770937, icon: "fa-graduation-cap", desc: "Đào tạo các ngành kinh tế, quản trị kinh doanh, tài chính - ngân hàng, kế toán,..." },
+            { id: "3", name: "Trường Sư phạm", category: "khoa", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "2QH9+77 Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "2-3 tầng", rooms: "15 phòng thí nghiệm", openingHours: "7h00 - 11h30, 13h30 - 17h00", lat: 10.028187, lng: 105.768187, icon: "fa-graduation-cap", desc: "Đào tạo cử nhân sư phạm, giáo viên các cấp và nghiên cứu khoa học giáo dục." },
+            { id: "4", name: "Trường Bách khoa", category: "khoa", image: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=600", address: "2QJ8+WQ Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "2-5 tầng", rooms: "46 phòng thí nghiệm, 3 phòng máy tính", openingHours: "7h00 - 11h30, 13h30 - 17h00", lat: 10.032312, lng: 105.766937, icon: "fa-gears", desc: "Đào tạo các ngành kỹ thuật, cơ khí, điện - điện tử, xây dựng, kỹ thuật hóa học,..." },
+            { id: "5", name: "Nhà học B1", category: "giangduong", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "7P272QJ9+J4, Ninh Kiều, Cần Thơ", building: "Dãy B1", floors: "1 tầng", rooms: "29 phòng", openingHours: "7h00 - 11h30, 13h30 - 17h30", lat: 10.031200, lng: 105.768900, icon: "fa-building", desc: "Giảng đường phục vụ học lý thuyết, sinh hoạt lớp và học phần." },
+            { id: "6", name: "Nhà học C2", category: "giangduong", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "7P272QH9+G8, Ninh Kiều, Cần Thơ", building: "Dãy C2", floors: "3 tầng", rooms: "23 phòng", openingHours: "7h00 - 11h30, 13h30 - 17h30", lat: 10.028900, lng: 105.768400, icon: "fa-building", desc: "Giảng đường phục vụ học lý thuyết, sinh hoạt lớp và học phần." },
+            { id: "7", name: "Nhà học C1", category: "giangduong", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "7P272QJC+95, Ninh Kiều, Cần Thơ", building: "Dãy C1", floors: "2 tầng", rooms: "29 phòng", openingHours: "7h00 - 21h00", lat: 10.030500, lng: 105.770500, icon: "fa-building", desc: "Giảng đường phục vụ học lý thuyết, sinh hoạt lớp và học phần." },
+            { id: "8", name: "Trường CNTT & Truyền Thông", category: "khoa", image: "https://images.unsplash.com/photo-1531482615713-2afd69097998?auto=format&fit=crop&q=80&w=600", address: "2QJ9+CM Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "4-5 tầng", rooms: "60 phòng chức năng và thực hành", openingHours: "7h00 - 11h30, 13h30 - 17h00", lat: 10.031062, lng: 105.769188, icon: "fa-laptop-code", desc: "Đào tạo nhân lực các ngành CNTT, khoa học máy tính, kỹ thuật phần mềm, mạng máy tính,..." },
+            { id: "9", name: "Trường Thuỷ sản", category: "khoa", image: "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&q=80&w=600", address: "2QJ8+J6 Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "2-4 tầng", rooms: "Hệ thống phòng thí nghiệm chuyên ngành", openingHours: "7h00 - 11h30, 13h30 - 17h00", lat: 10.031562, lng: 105.765563, icon: "fa-wheat-awn", desc: "Đào tạo và nghiên cứu nuôi trồng thủy sản, quản lý nguồn lợi và bệnh học thủy sản,..." },
+            { id: "10", name: "Toà nhà Công nghệ cao (ATL)", category: "khoa", image: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600", address: "2QHC+G4C, Ninh Kiều, Cần Thơ", building: "Tòa riêng (ATL)", floors: "7 tầng", rooms: "146 phòng chức năng", openingHours: "07:00 - 21:00", lat: 10.028813, lng: 105.770312, icon: "fa-gears", desc: "Khu phức hợp phòng thí nghiệm hiện đại phục vụ nghiên cứu khoa học chuyên sâu." },
+            { id: "11", name: "Nhà điều hành", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QHC+X6 Ninh Kiều, Cần Thơ", building: "Nhà điều hành", floors: "1 nhà 9 tầng, 2 nhà 4 tầng", rooms: "100 phòng chức năng", openingHours: "7h00 - 11h30, 13h30 - 17h00", lat: 10.029938, lng: 105.770562, icon: "fa-landmark", desc: "Trụ sở làm việc của Ban Giám hiệu và các phòng ban trung tâm." },
+            { id: "12", name: "Nhà học D2", category: "giangduong", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "2QJC+56 Ninh Kiều, Cần Thơ", building: "Trong Nhà điều hành", floors: "4 tầng", rooms: "25 phòng", openingHours: "7h00 - 17h30", lat: 10.030437, lng: 105.770562, icon: "fa-building", desc: "Giảng đường phục vụ học lý thuyết, sinh hoạt lớp và học phần." },
+            { id: "13", name: "Khoa dự bị dân tộc", category: "khoa", image: "https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&q=80&w=600", address: "2QH9+52 Ninh Kiều, Cần Thơ", building: "Dãy nhà của Khoa", floors: "3 tầng", rooms: "10-15 phòng", openingHours: "7h00 - 17h00", lat: 10.027938, lng: 105.767562, icon: "fa-graduation-cap", desc: "Bồi dưỡng kiến thức cho học sinh dân tộc thiểu số." },
+            { id: "14", name: "Hội trường Rùa", category: "giangduong", image: "https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&q=80&w=600", address: "2QH9+PQQ, Ninh Kiều, Cần Thơ", building: "Công trình riêng", floors: "2 tầng", rooms: "1,346 chỗ ngồi", openingHours: "07:30 - 22:00", lat: 10.029312, lng: 105.769437, icon: "fa-building", desc: "Nơi tổ chức các lễ kỷ niệm, hội nghị lớn, lễ tốt nghiệp." },
+            { id: "15", name: "Nhà Thi đấu mới", category: "tienich", image: "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=600", address: "2QM9+6MG, Ninh Kiều, Cần Thơ", building: "Công trình riêng", floors: "3 tầng", rooms: "1000 chỗ ngồi", openingHours: "06:00 - 21:00", lat: 10.033063, lng: 105.769188, icon: "fa-dumbbell", desc: "Nhà thể thao đa năng phục vụ học môn thể dục và thi đấu." },
+            { id: "16", name: "Khoa Luật", category: "khoa", image: "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&q=80&w=600", address: "2QH9+9WR, Cổng C ĐHCT", building: "Dãy nhà của khoa", floors: "2-3 tầng", rooms: "15-20 phòng", openingHours: "7h00 - 17h00", lat: 10.028438, lng: 105.769813, icon: "fa-scale-balanced", desc: "Đào tạo cử nhân ngành Luật, Luật Kinh tế và nghiên cứu pháp lý." },
+            { id: "17", name: "Trường Khoa học Tự Nhiên", category: "khoa", image: "https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&q=80&w=600", address: "2QMC+33 Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "2-4 tầng", rooms: "40 - 50 phòng", openingHours: "7h00 - 17h00", lat: 10.032688, lng: 105.770187, icon: "fa-graduation-cap", desc: "Đào tạo các ngành khoa học cơ bản như Toán, Lý, Hóa, Sinh." },
+            { id: "18", name: "Khoa Khoa học Xã hội & NV", category: "khoa", image: "https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=600", address: "2QMC+4JP, Ninh Kiều, Cần Thơ", building: "Dãy nhà của khoa", floors: "2-3 tầng", rooms: "Phòng học chuyên ngành", openingHours: "7h00 - 17h00", lat: 10.032813, lng: 105.771562, icon: "fa-graduation-cap", desc: "Đào tạo các ngành Văn học, Lịch sử, Báo chí, Du lịch." },
+            { id: "19", name: "Văn phòng Đoàn Thanh niên", category: "tienich", image: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&q=80&w=600", address: "2QJ9+7R7, Ninh Kiều, Cần Thơ", building: "Cạnh dãy CNTT&TT", floors: "1-2 tầng", rooms: "Phòng Đoàn - Hội", openingHours: "7h00 - 17h00", lat: 10.030687, lng: 105.769562, icon: "fa-landmark", desc: "Điều hành công tác Đoàn - Hội, quản lý các câu lạc bộ sinh viên." },
+            { id: "20", name: "Trường Nông nghiệp", category: "khoa", image: "https://images.unsplash.com/photo-1500937386664-56d1dfef3854?auto=format&fit=crop&q=80&w=600", address: "2QJ9+45 Ninh Kiều, Cần Thơ", building: "Dãy nhà của trường", floors: "3-4 tầng", rooms: "Phòng học & PTN Nông nghiệp", openingHours: "7h00 - 17h00", lat: 10.030312, lng: 105.767938, icon: "fa-wheat-awn", desc: "Đào tạo các ngành trồng trọt, chăn nuôi, thú y, bảo vệ thực vật." },
+            { id: "21", name: "Cây ATM", category: "tienich", image: "https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&q=80&w=600", address: "2QJC+4V Ninh Kiều, Cần Thơ", building: "Trạm ATM", floors: "Trệt", rooms: "1 phòng", openingHours: "24/24", lat: 10.030312, lng: 105.772188, icon: "fa-credit-card", desc: "Trạm rút tiền tự động và giao dịch tài chính nhanh." },
+            { id: "22", name: "Kí túc xá A", category: "tienich", image: "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&q=80&w=600", address: "2QH7+5RR Khu II, Đường 3/2", building: "Khu KTX A", floors: "4-5 tầng", rooms: "Nhiều phòng ở", openingHours: "24/24", lat: 10.027938, lng: 105.764562, icon: "fa-bed", desc: "Khu nội trú lưu trú cho sinh viên trong quá trình học tập." },
+            { id: "23", name: "Kí túc xá B", category: "tienich", image: "https://images.unsplash.com/photo-1555854877-bab0e564b8d5?auto=format&fit=crop&q=80&w=600", address: "2QH7+XQ6, Ninh Kiều, Cần Thơ", building: "Khu KTX B", floors: "4-5 tầng", rooms: "Nhiều phòng ở", openingHours: "24/24", lat: 10.029938, lng: 105.764437, icon: "fa-bed", desc: "Khu nội trú lưu trú cho sinh viên trong quá trình học tập." },
+            { id: "24", name: "Khu phức hợp Phòng thí nghiệm", category: "khoa", image: "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&q=80&w=600", address: "2QJ8+9F3, Ninh Kiều, Cần Thơ", building: "RLC (ODA Nhật Bản)", floors: "5 tầng", rooms: "Khu phòng thực hành", openingHours: "07:00 - 18:00", lat: 10.030938, lng: 105.766188, icon: "fa-graduation-cap", desc: "Hệ thống phòng thực hành, thí nghiệm hiện đại." },
+            { id: "25", name: "Viện CNSH & Thực phẩm", category: "khoa", image: "https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&q=80&w=600", address: "2QJ8+9F3, Ninh Kiều, Cần Thơ", building: "Viện R&D CNSH", floors: "5 tầng", rooms: "Phòng nghiên cứu", openingHours: "7h00 - 17h00", lat: 10.030938, lng: 105.766188, icon: "fa-gears", desc: "Đào tạo và nghiên cứu chuyên sâu về công nghệ sinh học và thực phẩm." },
+            { id: "26", name: "Viện Mekong", category: "khoa", image: "https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&q=80&w=600", address: "2QH8+P3P, Ninh Kiều, Cần Thơ", building: "Công trình riêng", floors: "2-3 tầng", rooms: "Phòng dự án", openingHours: "7h00 - 17h00", lat: 10.029312, lng: 105.765187, icon: "fa-graduation-cap", desc: "Nghiên cứu phát triển vùng ĐBSCL và đào tạo hợp tác." },
+            { id: "27", name: "Khoa Môi trường & TNTN", category: "khoa", image: "https://images.unsplash.com/photo-1500937386664-56d1dfef3854?auto=format&fit=crop&q=80&w=600", address: "2QG7+WXP, Ninh Kiều, Cần Thơ", building: "Dãy nhà của khoa", floors: "2-3 tầng", rooms: "Phòng học & PTN", openingHours: "7h00 - 17h00", lat: 10.027313, lng: 105.764938, icon: "fa-graduation-cap", desc: "Đào tạo và nghiên cứu quản lý môi trường, biến đổi khí hậu." },
+            { id: "28", name: "TT Sát hạch lái xe ĐHCT", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QJ9+8P Ninh Kiều, Cần Thơ", building: "Khu đào tạo", floors: "Trệt", rooms: "Sân tập & phòng thi", openingHours: "7h00 - 17h00", lat: 10.030812, lng: 105.769312, icon: "fa-landmark", desc: "Đào tạo và tổ chức thi sát hạch giấy phép lái xe mô tô, ô tô." },
+            { id: "29", name: "Vườn bàng", category: "tienich", image: "https://images.unsplash.com/photo-1519331379826-f10be5486c6f?auto=format&fit=crop&q=80&w=600", address: "2QJC+GJ5, Cổng A ĐHCT", building: "Khuôn viên xanh", floors: "Trệt", rooms: "Ngoài trời", openingHours: "06:00 - 22:00", lat: 10.031313, lng: 105.771562, icon: "fa-tree", desc: "Khuôn viên cây xanh mát, điểm nghỉ ngơi và tự học ngoài trời." },
+            { id: "30", name: "Nhà học A3", category: "giangduong", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "2QJC+CV Ninh Kiều, Cần Thơ", building: "Dãy A3", floors: "2 tầng", rooms: "Phòng học lý thuyết", openingHours: "7h00 - 17h30", lat: 10.031062, lng: 105.772188, icon: "fa-building", desc: "Giảng đường phục vụ học lý thuyết, sinh hoạt lớp." },
+            { id: "31", name: "Nhà Xuất bản ĐH Cần Thơ", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QJC+28 Ninh Kiều, Cần Thơ", building: "Khối văn phòng", floors: "2 tầng", rooms: "Văn phòng NXB", openingHours: "7h00 - 17h00", lat: 10.030062, lng: 105.770812, icon: "fa-landmark", desc: "Biên soạn, in ấn và phát hành giáo trình, tài liệu." },
+            { id: "32", name: "Phòng Đào tạo ĐHCT", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QJC+33 Ninh Kiều, Cần Thơ", building: "Nhà điều hành", floors: "2 tầng", rooms: "Phòng học vụ", openingHours: "7h00 - 17h00", lat: 10.030188, lng: 105.770187, icon: "fa-landmark", desc: "Quản lý hồ sơ học vụ, đăng ký học phần, thời khóa biểu và điểm số." },
+            { id: "33", name: "Matin Café", category: "tienich", image: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&q=80&w=600", address: "2QJ9+GC Ninh Kiều, Cần Thơ", building: "Quán Cafe", floors: "1 tầng", rooms: "Trong nhà & sân vườn", openingHours: "06:30 - 22:00", lat: 10.031313, lng: 105.768563, icon: "fa-mug-hot", desc: "Quán cà phê phục vụ đồ uống và không gian học tập nhóm." },
+            { id: "34", name: "Trạm Y Tế ĐHCT", category: "tienich", image: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=600", address: "2QJ9+JG7, Ninh Kiều, Cần Thơ", building: "Trạm Y tế", floors: "1-2 tầng", rooms: "Phòng khám & sơ cứu", openingHours: "07:00 - 17:00", lat: 10.031562, lng: 105.768812, icon: "fa-house-medical", desc: "Chăm sóc sức khỏe ban đầu, khám chữa bệnh thông thường." },
+            { id: "35", name: "Phòng Tập Gym ĐHCT", category: "tienich", image: "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=600", address: "2QJ9+QHG, Ninh Kiều, Cần Thơ", building: "Khu thể thao", floors: "1 tầng", rooms: "Phòng máy tập", openingHours: "05:30 - 20:30", lat: 10.031937, lng: 105.768937, icon: "fa-dumbbell", desc: "Phòng tập thể hình rèn luyện sức khỏe cho sinh viên." },
+            { id: "36", name: "Căn tin B1", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QJ9+C3R, Khu II ĐHCT", building: "Dãy B1", floors: "Trệt", rooms: "Quầy ăn uống", openingHours: "06:00 - 18:00", lat: 10.031062, lng: 105.767687, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "37", name: "Căn tin số 1 KTX B", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QH7+VW2, Ninh Kiều, Cần Thơ", building: "KTX B", floors: "Trệt", rooms: "Quầy ăn uống", openingHours: "06:00 - 20:00", lat: 10.029687, lng: 105.764813, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "38", name: "Căn tin số 3 KTX A", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QM9+CXH, Ninh Kiều, Cần Thơ", building: "KTX A", floors: "Trệt", rooms: "Quầy ăn uống", openingHours: "06:00 - 20:00", lat: 10.033563, lng: 105.769937, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "39", name: "Căn tin Trường KHTN", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QJC+PC7, Ninh Kiều, Cần Thơ", building: "Dãy KHTN", floors: "Trệt", rooms: "Quầy ăn uống", openingHours: "06:00 - 18:00", lat: 10.031812, lng: 105.771062, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "40", name: "Căn tin Trường CNTT&TT", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QJ9+GVV, Ninh Kiều, Cần Thơ", building: "Dãy CNTT&TT", floors: "Trệt", rooms: "Quầy ăn uống", openingHours: "06:00 - 18:30", lat: 10.031313, lng: 105.769688, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "41", name: "Căn tin Trung tâm Học liệu", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QJC+5J9, Cổng A ĐHCT", building: "Tòa Trung tâm Học liệu", floors: "Trệt", rooms: "Quầy ăn uống & cafe", openingHours: "06:30 - 20:30", lat: 10.030437, lng: 105.771562, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "42", name: "Bệnh Xá Thú Y", category: "tienich", image: "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=600", address: "2QH9+4X Ninh Kiều, Cần Thơ", building: "Bệnh Xá Thú Y", floors: "1-2 tầng", rooms: "Phòng khám động vật", openingHours: "07:00 - 17:00", lat: 10.027812, lng: 105.769937, icon: "fa-house-medical", desc: "Khám chữa bệnh cho động vật và thực hành cho sinh viên Thú y." },
+            { id: "43", name: "Trường THPT TH Sư Phạm", category: "khoa", image: "https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&q=80&w=600", address: "2QH9+57 Ninh Kiều, Cần Thơ", building: "Dãy THSP", floors: "3 tầng", rooms: "Các phòng học", openingHours: "06:30 - 17:30", lat: 10.027938, lng: 105.768187, icon: "fa-graduation-cap", desc: "Trường trung học trực thuộc, thực tập cho sinh viên Sư phạm." },
+            { id: "44", name: "Căn tin C2", category: "cantin", image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&q=80&w=600", address: "2QH9+MCH, Ninh Kiều, Cần Thơ", building: "Dãy C2", floors: "Trệt", rooms: "Quầy ăn uống", openingHours: "06:00 - 18:00", lat: 10.029188, lng: 105.768563, icon: "fa-utensils", desc: "Phục vụ ăn uống, điểm tâm, nước giải khát." },
+            { id: "45", name: "Nam Phong Mart", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QM9+CXH, Ninh Kiều, Cần Thơ", building: "KTX A", floors: "Trệt", rooms: "Cửa hàng tiện lợi", openingHours: "06:00 - 22:00", lat: 10.033563, lng: 105.769937, icon: "fa-store", desc: "Cửa hàng tiện lợi cung cấp thực phẩm, nhu yếu phẩm." },
+            { id: "46", name: "Cổng A", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QJC+3VC Ninh Kiều, Cần Thơ", building: "Cổng A", floors: "Trệt", rooms: "Chốt bảo vệ", openingHours: "24/24", lat: 10.030188, lng: 105.772188, icon: "fa-archway", desc: "Cổng ra vào chính kết nối đường 3/2." },
+            { id: "47", name: "Cổng B", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QHC+JCH Ninh Kiều, Cần Thơ", building: "Cổng B", floors: "Trệt", rooms: "Chốt bảo vệ", openingHours: "24/24", lat: 10.029063, lng: 105.771062, icon: "fa-archway", desc: "Cổng ra vào kết nối đường Mậu Thân." },
+            { id: "48", name: "Cổng C", category: "tienich", image: "https://images.unsplash.com/photo-1541829070764-84a7d30dd3f3?auto=format&fit=crop&q=80&w=600", address: "2QHC+523 Ninh Kiều, Cần Thơ", building: "Cổng C", floors: "Trệt", rooms: "Chốt bảo vệ", openingHours: "24/24", lat: 10.027938, lng: 105.770062, icon: "fa-archway", desc: "Cổng ra vào khu vực Khoa Luật / Sư phạm." },
+            { id: "49", name: "Nhà học D1", category: "giangduong", image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=600", address: "2QHC+V9C, Đường 3/2", building: "Dãy D1", floors: "4 tầng", rooms: "Phòng học lý thuyết", openingHours: "7h00 - 17h30", lat: 10.029687, lng: 105.770937, icon: "fa-building", desc: "Giảng đường phục vụ học lý thuyết, sinh hoạt lớp." }
+        ];
+
+        let map = null;
+        let mapMarkers = [];
+        let poisData = [];
+        let studentsDB = {};
+        let currentUser = { id: '', role: 'GUEST', isLoggedIn: false };
+        let currentDetailPoiId = null;
+        let routePolyline = null;
+        let currentTransportMode = 'walk';
+
+        function getFavorites() {
+            const fav = localStorage.getItem('ctu_favorites');
+            return fav ? JSON.parse(fav) : [];
+        }
+
+        function isFavorite(id) { return getFavorites().includes(id); }
+
+        function toggleFavorite(id) {
+            let favs = getFavorites();
+            if (favs.includes(id)) {
+                favs = favs.filter(i => i !== id);
+                showToast("Đã xóa khỏi Yêu thích");
+            } else {
+                favs.push(id);
+                showToast("Đã thêm vào Yêu thích ❤️");
+            }
+            localStorage.setItem('ctu_favorites', JSON.stringify(favs));
+            renderMapMarkers(poisData);
+            if (currentDetailPoiId === id) updateDetailFavButton(id);
+        }
+
+        function toggleCurrentPoiFavorite() { if (currentDetailPoiId) toggleFavorite(currentDetailPoiId); }
+
+        function updateDetailFavButton(id) {
+            const icon = document.getElementById('detailFavIcon');
+            if (icon) icon.className = isFavorite(id) ? "fa-solid fa-heart text-rose-500 text-base" : "fa-regular fa-heart text-slate-400 text-base";
+        }
+
+        function initLeafletMap() {
+            map = L.map('map', { zoomControl: true }).setView([10.0305, 105.7688], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+            renderMapMarkers(poisData);
+            setTimeout(() => { map.invalidateSize(); }, 300);
+        }
+
+        function renderMapMarkers(data) {
+            if (!map) return;
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapMarkers = [];
+            const bounds = [];
+
+            data.forEach(p => {
+                const isFav = isFavorite(p.id);
+                const markerHtml = `<div class="w-8 h-8 rounded-full ${isFav ? 'bg-rose-500' : 'bg-ctu-blue'} text-white flex items-center justify-center shadow-lg border-2 border-white"><i class="fa-solid ${p.icon || 'fa-location-dot'} text-xs"></i></div>`;
+                const customIcon = L.divIcon({ html: markerHtml, className: '', iconSize: [32, 32], iconAnchor: [16, 32] });
+                
+                const marker = L.marker([p.lat, p.lng], { icon: customIcon }).addTo(map);
+                bounds.push([p.lat, p.lng]);
+
+                marker.bindPopup(`
+                    <div class="w-52 text-slate-800">
+                        <img src="${p.image}" class="w-full h-24 object-cover rounded-lg mb-1.5 shadow-sm" onerror="this.src='https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&q=80&w=400'">
+                        <span class="bg-ctu-gold text-ctu-darkBlue font-black text-[9px] px-2 py-0.5 rounded uppercase">${p.category}</span>
+                        <h4 class="font-bold text-xs mt-1 leading-tight text-slate-900">${p.name}</h4>
+                        <p class="text-[10px] text-slate-500 mt-0.5 leading-tight"><i class="fa-solid fa-location-dot text-rose-500"></i> ${p.building}</p>
+                        <div class="flex gap-1 mt-2">
+                            <button onclick="showPoiDetailModal('${p.id}')" class="flex-1 bg-ctu-blue hover:bg-ctu-darkBlue text-white text-[10px] py-1 rounded font-bold transition">Chi Tiết</button>
+                            <button onclick="quickNavigate('${p.id}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] px-2 py-1 rounded font-bold transition"><i class="fa-solid fa-route"></i></button>
+                        </div>
+                    </div>
+                `);
+                mapMarkers.push(marker);
+            });
+
+            if (bounds.length > 0 && data.length === poisData.length) {
+                map.fitBounds(bounds, { padding: [30, 30] });
+            }
+        }
+
+        function quickNavigate(id) {
+            switchTab('directions');
+            document.getElementById('routeDestination').value = id;
+            calculateRoute();
+        }
+
+        function showPoiDetailModal(id) {
+            const poi = poisData.find(p => p.id === id);
+            if (!poi) return;
+            currentDetailPoiId = id;
+
+            document.getElementById('detailName').innerText = poi.name;
+            document.getElementById('detailCategoryPill').innerText = (poi.category || 'tiện ích').toUpperCase();
+            document.getElementById('detailImg').src = poi.image;
+            document.getElementById('detailAddress').innerText = poi.address;
+            document.getElementById('detailBuilding').innerText = poi.building || 'Chưa cập nhật';
+            document.getElementById('detailFloors').innerText = poi.floors || '1 tầng';
+            document.getElementById('detailRooms').innerText = poi.rooms || 'Nhiều phòng';
+            document.getElementById('detailOpeningHours').innerText = poi.openingHours || '07:00 - 21:00';
+            document.getElementById('detailDesc').innerText = poi.desc || 'Địa điểm thuộc ĐH Cần Thơ.';
+
+            updateDetailFavButton(id);
+            document.getElementById('poiDetailModal').classList.remove('hidden');
+        }
+
+        function closePoiDetailModal() { document.getElementById('poiDetailModal').classList.add('hidden'); }
+
+        function navigateFromDetail() {
+            if (!currentDetailPoiId) return;
+            const id = currentDetailPoiId;
+            closePoiDetailModal();
+            switchTab('directions');
+            document.getElementById('routeDestination').value = id;
+            calculateRoute();
+        }
+
+        function filterCategory(cat) {
+            if (cat === 'all') renderMapMarkers(poisData);
+            else if (cat === 'favorite') renderMapMarkers(poisData.filter(p => isFavorite(p.id)));
+            else renderMapMarkers(poisData.filter(p => p.category === cat));
+        }
+
+        function handleSearch(e) {
+            const q = e.target.value.toLowerCase().trim();
+            const results = document.getElementById('searchResults');
+            const clearBtn = document.getElementById('clearSearchBtn');
+
+            if (!q) { 
+                results.classList.add('hidden'); 
+                clearBtn.classList.add('hidden');
+                return; 
+            }
+
+            clearBtn.classList.remove('hidden');
+            const filtered = poisData.filter(p => p.name.toLowerCase().includes(q) || p.building.toLowerCase().includes(q));
+            if (filtered.length === 0) {
+                results.innerHTML = `<div class="p-3 text-center text-xs text-slate-400">Không tìm thấy địa điểm</div>`;
+            } else {
+                results.innerHTML = filtered.map(p => `
+                    <div onclick="selectSearchResult('${p.id}')" class="p-2.5 hover:bg-white cursor-pointer flex justify-between items-center text-xs rounded-xl">
+                        <div><strong>${p.name}</strong><br><span class="text-slate-400">${p.building}</span></div>
+                        <span class="bg-blue-50 text-ctu-blue font-bold text-[9px] px-2 py-0.5 rounded">${p.category}</span>
+                    </div>
+                `).join('');
+            }
+            results.classList.remove('hidden');
+        }
+
+        function clearSearch() {
+            document.getElementById('mapSearchInput').value = '';
+            document.getElementById('searchResults').classList.add('hidden');
+            document.getElementById('clearSearchBtn').classList.add('hidden');
+        }
+
+        function selectSearchResult(id) {
+            const poi = poisData.find(p => p.id === id);
+            if (poi && map) {
+                map.flyTo([poi.lat, poi.lng], 18);
+                document.getElementById('searchResults').classList.add('hidden');
+                showPoiDetailModal(id);
+            }
+        }
+
+        function getUserLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    const lat = pos.coords.latitude, lng = pos.coords.longitude;
+                    map.flyTo([lat, lng], 17);
+                    L.marker([lat, lng]).addTo(map).bindPopup("Vị trí của bạn").openPopup();
+                    showToast("Đã định vị vị trí GPS!");
+                }, () => showToast("Bật GPS trên thiết bị để sử dụng!"));
+            }
+        }
+
+        function resetMapView() { if (map) map.flyTo([10.0305, 105.7688], 16); }
+
+        function setTransportMode(mode) {
+            currentTransportMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.className = "mode-btn text-slate-600 py-2 rounded-xl transition";
+            });
+            document.getElementById(`btn-mode-${mode}`).className = "mode-btn bg-ctu-blue text-white py-2 rounded-xl shadow-sm transition";
+        }
+
+        function calculateRoute() {
+            const id = document.getElementById('routeDestination').value;
+            if (!id) return showToast("Chọn điểm đến!");
+            const poi = poisData.find(p => p.id === id);
+            
+            const originLat = 10.030188, originLng = 105.772188;
+            
+            const R = 6371e3;
+            const φ1 = originLat * Math.PI/180, φ2 = poi.lat * Math.PI/180;
+            const Δφ = (poi.lat-originLat) * Math.PI/180, Δλ = (poi.lng-originLng) * Math.PI/180;
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const dist = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+
+            let speed = currentTransportMode === 'walk' ? 1.2 : (currentTransportMode === 'bike' ? 3.5 : 5.5);
+            let timeMin = Math.max(1, Math.round(dist / (speed * 60)));
+
+            document.getElementById('routeDistance').innerText = `${dist} m`;
+            document.getElementById('routeDuration').innerText = `~ ${timeMin} phút`;
+            document.getElementById('routeStepsList').innerHTML = `
+                <div class="p-2.5 bg-white rounded-xl border flex items-center gap-2"><i class="fa-solid fa-circle text-emerald-500 text-xs"></i> 1. Xuất phát từ Cổng A (Đường 3/2)</div>
+                <div class="p-2.5 bg-white rounded-xl border flex items-center gap-2"><i class="fa-solid fa-arrow-up text-blue-500 text-xs"></i> 2. Đi thẳng theo trục đường chính Campus II</div>
+                <div class="p-2.5 bg-white rounded-xl border flex items-center gap-2"><i class="fa-solid fa-location-dot text-rose-500 text-xs"></i> 3. Đến mục tiêu: <strong>${poi.name}</strong> (${poi.building})</div>
+            `;
+            document.getElementById('routeInfoCard').classList.remove('hidden');
+
+            if (map) {
+                if (routePolyline) map.removeLayer(routePolyline);
+                const routeCoords = [
+                    [originLat, originLng],
+                    [(originLat + poi.lat)/2, (originLng + poi.lng)/2],
+                    [poi.lat, poi.lng]
+                ];
+                routePolyline = L.polyline(routeCoords, { color: '#00a8cc', weight: 5, opacity: 0.9, dashArray: '8, 8' }).addTo(map);
+            }
+        }
+
+        function showRouteOnMap() {
+            switchTab('map');
+            const id = document.getElementById('routeDestination').value;
+            const poi = poisData.find(p => p.id === id);
+            if (poi && map) {
+                map.fitBounds([
+                    [10.030188, 105.772188],
+                    [poi.lat, poi.lng]
+                ], { padding: [50, 50] });
+            }
+        }
+
+        function generateSecureQRToken(mssv) {
+            const timeWindow = Math.floor(Date.now() / 30000);
+            const secret = "CTU_SECURE_TOKEN_2026";
+            let hash = 0;
+            const str = `${mssv}_${timeWindow}_${secret}`;
+            for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash |= 0; }
+            const tokenHash = Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
+            return { payload: `CTU_VERIFY|${mssv}|${timeWindow}|${tokenHash}`, shortHash: tokenHash };
+        }
+
+        function renderDynamicQRCode() {
+            const container = document.getElementById('cardQRCode');
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (!currentUser.isLoggedIn || currentUser.role !== 'STUDENT') {
+                new QRCode(container, { text: "UNAUTH", width: 80, height: 80 });
+                document.getElementById('qrTokenShortCode').innerText = "HASH: UNAUTH";
+                return;
+            }
+
+            const tokenObj = generateSecureQRToken(currentUser.id);
+            new QRCode(container, { text: tokenObj.payload, width: 80, height: 80, colorDark: "#0054a6" });
+            document.getElementById('qrTokenShortCode').innerText = `HASH: ${tokenObj.shortHash}`;
+        }
+
+        function flipStudentCard() { document.getElementById('cardInner').classList.toggle('card-flipped'); }
+
+        function loadUserData() {
+            const saved = localStorage.getItem('ctu_app_user');
+            if (saved) currentUser = JSON.parse(saved);
+
+            const badge = document.getElementById('headerRoleBadge');
+            const nameDisp = document.getElementById('headerUserName');
+
+            if (currentUser.isLoggedIn && currentUser.role === 'ADMIN') {
+                badge.innerText = 'ADMIN'; badge.className = 'bg-purple-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full';
+                nameDisp.innerText = 'Admin';
+                document.getElementById('adminAccessDeniedCard').classList.add('hidden');
+                document.getElementById('adminDashboardView').classList.remove('hidden');
+            } else if (currentUser.isLoggedIn && currentUser.role === 'STUDENT' && studentsDB[currentUser.id]) {
+                const s = studentsDB[currentUser.id];
+                badge.innerText = 'SINH VIÊN'; badge.className = 'bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full';
+                nameDisp.innerText = s.name.split(' ').pop();
+
+                document.getElementById('cardMSSV').innerText = currentUser.id;
+                document.getElementById('cardName').innerText = s.name;
+                document.getElementById('cardClass').innerText = s.classCode;
+                document.getElementById('cardFaculty').innerText = s.faculty;
+                document.getElementById('cardAvatar').src = formatDriveImageUrl(s.avatar);
+                document.getElementById('cardBarcodeText').innerText = `*${currentUser.id}*`;
+
+                document.getElementById('adminAccessDeniedCard').classList.remove('hidden');
+                document.getElementById('adminDashboardView').classList.add('hidden');
+            } else {
+                badge.innerText = 'KHÁCH'; badge.className = 'bg-amber-400 text-slate-900 text-[10px] font-black px-2 py-0.5 rounded-full';
+                nameDisp.innerText = 'Đăng nhập';
+                document.getElementById('adminAccessDeniedCard').classList.remove('hidden');
+                document.getElementById('adminDashboardView').classList.add('hidden');
+            }
+        }
+
+        function toggleAuthModal(mode) {
+            if (mode === 'ADMIN') {
+                document.getElementById('inputMSSV').value = 'admin';
+                document.getElementById('inputPassword').value = 'admin123';
+            }
+            document.getElementById('authModal').classList.toggle('hidden');
+        }
+
+        function handleAuthSubmit(e) {
+            e.preventDefault();
+            const u = document.getElementById('inputMSSV').value.trim().toLowerCase();
+            const p = document.getElementById('inputPassword').value.trim();
+
+            if (DEFAULT_ADMINS[u] && DEFAULT_ADMINS[u].password === p) {
+                currentUser = { id: u, role: 'ADMIN', isLoggedIn: true };
+                localStorage.setItem('ctu_app_user', JSON.stringify(currentUser));
+                loadUserData(); toggleAuthModal(); switchTab('admin');
+                showToast("Đăng nhập Admin thành công!");
+                return;
+            }
+
+            const sKey = u.toUpperCase();
+            if (studentsDB[sKey] && studentsDB[sKey].password === p) {
+                currentUser = { id: sKey, role: 'STUDENT', isLoggedIn: true };
+                localStorage.setItem('ctu_app_user', JSON.stringify(currentUser));
+                loadUserData(); renderDynamicQRCode(); toggleAuthModal(); switchTab('card');
+                showToast(`Xin chào ${studentsDB[sKey].name}!`);
+                return;
+            }
+
+            showToast("Tài khoản hoặc mật khẩu không chính xác!");
+        }
+
+        function handleLogout() {
+            currentUser = { id: '', role: 'GUEST', isLoggedIn: false };
+            localStorage.removeItem('ctu_app_user');
+            loadUserData(); renderDynamicQRCode(); switchTab('map');
+            showToast("Đã đăng xuất!");
+        }
+
+        function openProfileEditModal() {
+            if (!currentUser.isLoggedIn || currentUser.role !== 'STUDENT') return showToast("Vui lòng đăng nhập!");
+            const s = studentsDB[currentUser.id];
+            document.getElementById('editStudentName').value = s.name;
+            document.getElementById('editStudentClass').value = s.classCode;
+            document.getElementById('editStudentYear').value = s.enrollmentYear || 2025;
+            document.getElementById('editStudentFaculty').value = s.faculty;
+            document.getElementById('editStudentAvatar').value = s.avatar;
+            document.getElementById('profileEditModal').classList.remove('hidden');
+        }
+
+        function closeProfileEditModal() { document.getElementById('profileEditModal').classList.add('hidden'); }
+
+        function handleProfileEditSubmit(e) {
+            e.preventDefault();
+            const s = studentsDB[currentUser.id];
+            s.name = document.getElementById('editStudentName').value.trim().toUpperCase();
+            s.classCode = document.getElementById('editStudentClass').value.trim();
+            s.enrollmentYear = parseInt(document.getElementById('editStudentYear').value) || 2025;
+            s.faculty = document.getElementById('editStudentFaculty').value.trim();
+            s.avatar = document.getElementById('editStudentAvatar').value.trim();
+
+            localStorage.setItem('ctu_students_db', JSON.stringify(studentsDB));
+            loadUserData(); closeProfileEditModal();
+            showToast("Đã cập nhật thông tin!");
+        }
+
+        function openAddPoiModal() { document.getElementById('addPoiModal').classList.remove('hidden'); }
+        function closeAddPoiModal() { document.getElementById('addPoiModal').classList.add('hidden'); }
+
+        function handleAddPoiSubmit(e) {
+            e.preventDefault();
+            const newPoi = {
+                id: (poisData.length + 1).toString(),
+                name: document.getElementById('addPoiName').value.trim(),
+                category: document.getElementById('addPoiCategory').value,
+                building: document.getElementById('addPoiBuilding').value.trim(),
+                image: document.getElementById('addPoiImage').value.trim(),
+                lat: parseFloat(document.getElementById('addPoiLat').value),
+                lng: parseFloat(document.getElementById('addPoiLng').value),
+                desc: document.getElementById('addPoiDesc').value.trim() || 'Địa điểm mới thêm.',
+                address: 'Khu II Đại học Cần Thơ',
+                floors: '1 tầng', rooms: 'Phòng học', openingHours: '07:00 - 17:00', icon: 'fa-location-dot'
+            };
+
+            poisData.push(newPoi);
+            localStorage.setItem('ctu_map_pois', JSON.stringify(poisData));
+            renderAdminTable(); renderMapMarkers(poisData); populateSelectOptions();
+            closeAddPoiModal();
+            showToast("Đã thêm địa điểm mới!");
+        }
+
+        function executeVerification() {
+            const payload = document.getElementById('verifyQrInput').value.trim();
+            const resCard = document.getElementById('verifyResultCard');
+            if (!payload) return showToast("Vui lòng nhập mã QR!");
+
+            if (payload.startsWith("CTU_VERIFY|")) {
+                const parts = payload.split('|');
+                const mssv = parts[1];
+                const s = studentsDB[mssv];
+
+                if (s) {
+                    resCard.className = "rounded-2xl p-3 bg-emerald-500 text-white font-semibold space-y-1";
+                    resCard.innerHTML = `<i class="fa-solid fa-circle-check text-base"></i> THẺ HỢP LỆ!<br>Sinh viên: <strong>${s.name}</strong> (${mssv}) - ${s.faculty}`;
+                } else {
+                    resCard.className = "rounded-2xl p-3 bg-rose-600 text-white font-semibold";
+                    resCard.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Không tìm thấy MSSV trong hệ thống!`;
+                }
+            } else {
+                resCard.className = "rounded-2xl p-3 bg-rose-600 text-white font-semibold";
+                resCard.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> Mã QR Không Hợp Lệ Hoặc Đã Bị Thay Đổi!`;
+            }
+            resCard.classList.remove('hidden');
+        }
+
+        function testVerifyCurrentStudent() {
+            if (!currentUser.isLoggedIn || currentUser.role !== 'STUDENT') return showToast("Đăng nhập tài khoản sinh viên trước!");
+            const obj = generateSecureQRToken(currentUser.id);
+            document.getElementById('verifyQrInput').value = obj.payload;
+            executeVerification();
+        }
+
+        function testVerifyExpiredStudent() {
+            document.getElementById('verifyQrInput').value = `CTU_VERIFY|B2001234|1000|HASH_OLD`;
+            executeVerification();
+        }
+
+        function testVerifyForgedToken() {
+            document.getElementById('verifyQrInput').value = `CTU_VERIFY|B2501444|9999|FAKE_HASH`;
+            executeVerification();
+        }
+
+        function renderAdminTable() {
+            const tbody = document.getElementById('adminTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = poisData.map(p => `
+                <tr class="hover:bg-slate-50">
+                    <td class="p-2 font-bold">${p.name}</td>
+                    <td class="p-2"><span class="bg-blue-50 text-ctu-blue px-2 py-0.5 rounded font-bold">${p.category}</span></td>
+                    <td class="p-2">${p.building}</td>
+                    <td class="p-2 text-right">
+                        <button onclick="deletePoi('${p.id}')" class="text-rose-500 hover:text-rose-700 px-1"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function deletePoi(id) {
+            if (!confirm("Xóa địa điểm này?")) return;
+            poisData = poisData.filter(p => p.id !== id);
+            localStorage.setItem('ctu_map_pois', JSON.stringify(poisData));
+            renderAdminTable(); renderMapMarkers(poisData); populateSelectOptions();
+            showToast("Đã xóa địa điểm!");
+        }
+
+        function populateSelectOptions() {
+            const select = document.getElementById('routeDestination');
+            select.innerHTML = `<option value="">-- Chọn điểm đến trong 49 địa điểm --</option>` +
+                poisData.map(p => `<option value="${p.id}">${p.name} (${p.building})</option>`).join('');
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.replace('text-ctu-gold', 'text-slate-300'));
+
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+            const activeNav = document.getElementById(`nav-${tabId}`);
+            if (activeNav) activeNav.classList.replace('text-slate-300', 'text-ctu-gold');
+
+            if (tabId === 'map' && map) setTimeout(() => map.invalidateSize(), 200);
+            if (tabId === 'card') renderDynamicQRCode();
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 2500);
+        }
+
+        window.onload = function() {
+            // Tự động làm sạch cache cũ để cập nhật danh sách 4 Sinh Viên & 49 Địa Điểm
+            localStorage.removeItem('ctu_students_db');
+            localStorage.removeItem('ctu_map_pois');
+
+            studentsDB = { ...DEFAULT_STUDENTS };
+            poisData = [...DEFAULT_POIS];
+
+            initLeafletMap();
+            populateSelectOptions();
+            renderAdminTable();
+            loadUserData();
+            renderDynamicQRCode();
+
+            setInterval(() => { renderDynamicQRCode(); }, 30000);
+        };
+    </script>
+</body>
+</html>
